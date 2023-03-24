@@ -95,42 +95,69 @@ for i = 1:2
 end
 ```
 """
-function convertTECtoVTU(head, data, connectivity, filename="out")
+function convertTECtoVTU(head, results, filename="out")
+   data = results["data"]
+   connectivity = results["connectivity"]
    nVar = length(head.variables)
-   points = @view data[1:head.nDim,:]
-   cells = Vector{MeshCell{VTKCellType,Array{Int32,1}}}(undef,head.nCell)
+   if !("geometry" in keys(results))
+      points = @view data[1:head.nDim,:]
+      cells = Vector{MeshCell{VTKCellType,Array{Int32,1}}}(undef,head.nCell)
+      skipVars = head.nDim
+   else
+      points = @view results["geometry"][1:head.nDim,:]
+      cells = Vector{MeshCell{VTKCellType,Array{Int32,1}}}(undef,head.nCell)
+      skipVars = 0
+   end
 
    if head.nDim == 3
-      @inbounds for i = 1:head.nCell
+      @inbounds for i = 1:head.nConn
          cells[i] = MeshCell(VTKCellTypes.VTK_HEXAHEDRON, connectivity[:,i])
       end
    elseif head.nDim == 2
-      @inbounds for i = 1:head.nCell
+      @inbounds for i = 1:head.nConn
          cells[i] = MeshCell(VTKCellTypes.VTK_QUAD, connectivity[:,i])
       end
    end
 
    vtkfile = vtk_grid(filename, points, cells)
 
-   for ivar = head.nDim+1:nVar
+   if !("geometry" in keys(results))
+      for iDim in 1:head.nDim
+         var = @view results["geometry"][iDim,:]
+         vtk_point_data(vtkfile, var, "X"*string(iDim))
+      end
+   end
+   for ivar = skipVars+1:nVar
       if endswith(head.variables[ivar],"_x") # vector
          if head.nDim == 3
             var1 = @view data[ivar,:]
             var2 = @view data[ivar+1,:]
             var3 = @view data[ivar+2,:]
             namevar = replace(head.variables[ivar], "_x"=>"")
-            vtk_point_data(vtkfile, (var1, var2, var3), namevar)
+            if !("geometry" in keys(results))
+                vtk_point_data(vtkfile, (var1, var2, var3), namevar)
+            else
+                vtk_cell_data(vtkfile, (var1, var2, var3), namevar)
+            end
          elseif head.nDim == 2
             var1 = @view data[ivar,:]
             var2 = @view data[ivar+1,:]
             namevar = replace(head.variables[ivar], "_x"=>"")
-            vtk_point_data(vtkfile, (var1, var2), namevar)
+            if !("geometry" in keys(results))
+               vtk_point_data(vtkfile, (var1, var2), namevar)
+            else
+               vtk_cell_data(vtkfile, (var1, var2), namevar)
+            end
          end
       elseif endswith(head.variables[ivar],r"_y|_z")
          continue
       else
          var = @view data[ivar,:]
-         vtk_point_data(vtkfile, var, head.variables[ivar])
+         if !("geometry" in keys(results))
+            vtk_point_data(vtkfile, var, head.variables[ivar])
+         else
+            vtk_cell_data(vtkfile, var, head.variables[ivar])
+         end
       end
    end
 

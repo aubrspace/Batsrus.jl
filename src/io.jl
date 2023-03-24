@@ -110,7 +110,7 @@ function readlogdata(filename::AbstractString)
 end
 
 """
-	readtecdata(filename; verbose=false)
+	readtecdata(filename; doGeometry=false, verbose=false)
 
 Return header, data and connectivity from BATSRUS Tecplot outputs. Both 2D and
 3D binary and ASCII formats are supported.
@@ -120,7 +120,8 @@ filename = "3d_ascii.dat"
 head, data, connectivity = readtecdata(filename)
 ```
 """
-function readtecdata(filename::AbstractString; verbose::Bool=false)
+function readtecdata(filename::AbstractString; doGeometry::Bool=false,
+                                               verbose::Bool=false)
    f = open(filename)
 
    nDim  = 3
@@ -178,6 +179,16 @@ function readtecdata(filename::AbstractString; verbose::Bool=false)
       end
       ln = readline(f) |> strip
    end
+    # if geometry is called for it means we want cc data with nodal XYZ
+    if !doGeometry
+        nData = nNode
+        nConn = nCell
+        nGeom = nNode
+    else
+        nData = nCell
+        nConn = nCell
+        nGeom = nNode
+    end
 
    auxdataname = String[]
    auxdata = Union{Int32, String}[]
@@ -202,12 +213,18 @@ function readtecdata(filename::AbstractString; verbose::Bool=false)
 
    seek(f, pt0)
 
-   data = Array{Float32,2}(undef, length(VARS), nNode)
+   data = Array{Float32,2}(undef, length(VARS), nData)
 
    if nDim == 3
-	   connectivity = Array{Int32,2}(undef,8,nCell)
+	   connectivity = Array{Int32,2}(undef,8,nConn)
+       if doGeometry
+          geometry = Array{Float32,2}(undef,3,nGeom)
+       end
    elseif nDim == 2
-	   connectivity = Array{Int32,2}(undef,4,nCell)
+	   connectivity = Array{Int32,2}(undef,4,nConn)
+       if doGeometry
+          geometry = Array{Float32,2}(undef,2,nGeom)
+       end
    end
 
    IsBinary = false
@@ -221,29 +238,47 @@ function readtecdata(filename::AbstractString; verbose::Bool=false)
    seek(f, pt0)
 
    if IsBinary
-	   @inbounds for i = 1:nNode
+	   @inbounds for i = 1:nData
 		   read!(f, @view data[:,i])
 	   end
-	   @inbounds for i = 1:nCell
+	   @inbounds for i = 1:nConn
          read!(f, @view connectivity[:,i])
-      end
+       end
+       if doGeometry
+	      @inbounds for i = 1:nGeom
+             read!(f, @view geometry[:,i])
+          end
+       end
    else
-      @inbounds for i = 1:nNode
+      @inbounds for i = 1:nData
          x = readline(f)
          data[:,i] .= parse.(Float32, split(x))
       end
-	   @inbounds for i = 1:nCell
+	  @inbounds for i = 1:nCell
 		   x = readline(f)
 		   connectivity[:,i] .= parse.(Int32, split(x))
-	   end
+	  end
+      if doGeometry
+	      @inbounds for i = 1:nGeom
+		     x = readline(f)
+		     geometry[:,i] .= parse.(Float32, split(x))
+          end
+      end
    end
 
    close(f)
 
-   head = (variables=VARS, nNode=nNode, nCell=nCell, nDim=nDim, ET=ET,
-		title=title, auxdataname=auxdataname, auxdata=auxdata)
+   head = (variables=VARS, nCell=nCell, nNode=nNode, nData=nData, nConn=nConn,
+           nGeom=nGeom, nDim=nDim, ET=ET, title=title,
+           auxdataname=auxdataname, auxdata=auxdata)
 
-   head, data, connectivity
+   results = Dict{String,Array}("data"         => data,
+                                "connectivity" => connectivity)
+   if doGeometry
+       results["geometry"] = geometry
+   end
+
+   head, results
 end
 
 "Obtain file type."
